@@ -1,0 +1,72 @@
+library(rstudioapi)
+setwd(dirname(getSourceEditorContext()$path))
+source("loadVar.R")
+source("initiateDB.R")
+ui=fluidPage(
+    useShinyjs(),
+    fluidRow(
+        titlePanel("Sprint"),
+        column(3,
+               wellPanel(
+                   textInput("project","Project"),
+                   radioButtons("importance","Importance",c("High","Medium","Low")),
+                   textInput("sub_project","Sub_project"),
+                   textInput("task","Task"),
+                   uiOutput("ui_taskDependency"),
+                   sliderInput("duration_week","Duration (week)",1,10,3),
+                   actionButton("submit","Submit"),
+                   actionButton("reset","Reset")
+               )
+        ),
+        column(5,
+               DT::dataTableOutput("timelineDT")
+        )
+    )
+)
+server=function(input,output,session) {
+    output$ui_taskDependency=renderUI({
+        req(input$sub_project)
+        db=dbConnect(RSQLite::SQLite(),"db.sqlite")
+        dt=dbReadTable(db,"timeline")%>%setDT
+        dbDisconnect(db)
+        if(dt[sub_project==input$sub_project,.N]>0) {
+            choices=dt[sub_project==input$sub_project,c("",sort(unique(task)))]
+            UI=selectInput("task_dependency","Task dependency",choices,size=length(choices),selectize=F)
+            return(UI)
+        } else {
+            ""
+        }
+    })
+    observeEvent(input$submit,{
+        db=dbConnect(RSQLite::SQLite(),"db.sqlite")
+        dt=dbReadTable(db,"timeline")%>%setDT
+        startDate=ifelse(is.null(input$task_dependency),
+                         as.character(initialDate),
+                         dt[sub_project==input$sub_project&task==input$task_dependency,endDate])
+        endDate=as.character(date(startDate)+(input$duration_week*7))
+        newData=data.table(project=input$project,
+                           importance=input$importance,
+                           sub_project=input$sub_project,
+                           task=input$task,
+                           task_dependency=input$task_dependency,
+                           duration_week=input$duration_week,
+                           startDate=startDate,
+                           endDate=endDate)
+        dbAppendTable(db,tableName,newData)
+        dbDisconnect(db)
+        sapply(c("project","sub_project","task"),shinyjs::reset)
+    })
+    observeEvent(input$reset,{
+        sapply(c("project","sub_project","task"),shinyjs::reset)
+    })
+    dt=eventReactive(input$submit,{
+        db=dbConnect(RSQLite::SQLite(),"db.sqlite")
+        dt=dbReadTable(db,"timeline")
+        dbDisconnect(db)
+        return(dt)
+    },ignoreNULL = F)
+    output$timelineDT=DT::renderDataTable({
+        datatable(dt())
+    })
+}
+shinyApp(ui=ui,server=server)

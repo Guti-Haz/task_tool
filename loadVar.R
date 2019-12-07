@@ -1,0 +1,9 @@
+pacman::p_load(RSQLite,
+               DBI,
+               magrittr,
+               data.table,
+               shiny,
+               DT,
+               lubridate,
+               shinyjs)
+initialDate=date(today())
