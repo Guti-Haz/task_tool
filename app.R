@@ -9,64 +9,90 @@ ui=fluidPage(
         column(3,
                wellPanel(
                    textInput("project","Project"),
-                   radioButtons("importance","Importance",c("High","Medium","Low")),
-                   textInput("sub_project","Sub_project"),
-                   textInput("task","Task"),
                    uiOutput("ui_taskDependency"),
+                   textInput("task","Task"),
                    sliderInput("duration_week","Duration (week)",1,10,3),
                    actionButton("submit","Submit"),
                    actionButton("reset","Reset")
                )
         ),
-        column(5,
-               DT::dataTableOutput("timelineDT")
+        column(7,
+               tabsetPanel(
+                   tabPanel("timevis",
+                            br(),
+                            timevisOutput("gantt")),
+                   tabPanel("datatable",
+                            br(),
+                            DT::dataTableOutput("timelineDT"))
+               )
         )
     )
 )
 server=function(input,output,session) {
+    rv=reactiveValues(state=F)
     output$ui_taskDependency=renderUI({
-        req(input$sub_project)
-        db=dbConnect(RSQLite::SQLite(),"db.sqlite")
-        dt=dbReadTable(db,"timeline")%>%setDT
-        dbDisconnect(db)
-        if(dt[sub_project==input$sub_project,.N]>0) {
-            choices=dt[sub_project==input$sub_project,c("",sort(unique(task)))]
+        req(input$project)
+        conn=dbConnect(RSQLite::SQLite(),"db.sqlite")
+        dt=dbReadTable(conn,"timeline")%>%setDT
+        dbDisconnect(conn)
+        if(dt[project==input$project,.N]>0) {
+            choices=dt[project==input$project,c("",sort(unique(task)))]
             UI=selectInput("task_dependency","Task dependency",choices,size=length(choices),selectize=F)
+            rv$state=T
             return(UI)
         } else {
             ""
         }
     })
     observeEvent(input$submit,{
-        db=dbConnect(RSQLite::SQLite(),"db.sqlite")
-        dt=dbReadTable(db,"timeline")%>%setDT
-        startDate=ifelse(is.null(input$task_dependency),
-                         as.character(initialDate),
-                         dt[sub_project==input$sub_project&task==input$task_dependency,endDate])
+        conn=dbConnect(RSQLite::SQLite(),"db.sqlite")
+        dt=dbReadTable(conn,"timeline")%>%setDT
+        if(rv$state==F){
+            startDate=as.character(initialDate)
+        } else {
+            if(input$task_dependency!=""){
+                startDate=dt[project==input$project&task==input$task_dependency,endDate]
+            } else {
+                startDate=as.character(initialDate)
+            }
+        }
         endDate=as.character(date(startDate)+(input$duration_week*7))
         newData=data.table(project=input$project,
-                           importance=input$importance,
-                           sub_project=input$sub_project,
                            task=input$task,
                            task_dependency=input$task_dependency,
                            duration_week=input$duration_week,
                            startDate=startDate,
                            endDate=endDate)
-        dbAppendTable(db,tableName,newData)
-        dbDisconnect(db)
-        sapply(c("project","sub_project","task"),shinyjs::reset)
+        dbAppendTable(conn,"timeline",newData)
+        dbDisconnect(conn)
+        sapply(c("project","task"),shinyjs::reset)
+        rv$state=F
     })
     observeEvent(input$reset,{
-        sapply(c("project","sub_project","task"),shinyjs::reset)
+        sapply(c("project","task"),shinyjs::reset)
     })
     dt=eventReactive(input$submit,{
-        db=dbConnect(RSQLite::SQLite(),"db.sqlite")
-        dt=dbReadTable(db,"timeline")
-        dbDisconnect(db)
+        conn=dbConnect(RSQLite::SQLite(),"db.sqlite")
+        dt=dbReadTable(conn,"timeline")
+        dbDisconnect(conn)
         return(dt)
     },ignoreNULL = F)
     output$timelineDT=DT::renderDataTable({
         datatable(dt())
+    })
+    output$gantt=renderTimevis({
+        data=dt()%>%
+            setDT%>%
+            .[,.(start=startDate,
+                 end=endDate,
+                 group=project,
+                 content=task)]
+        groups=dt()%>%
+            setDT%>%
+            .[,.(id=project,
+                 content=project)]%>%
+            unique
+        timevis(data=data,groups=groups)
     })
 }
 shinyApp(ui=ui,server=server)
