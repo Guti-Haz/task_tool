@@ -5,13 +5,17 @@ if("db.sqlite"%in%list.files()==T) unlink("db.sqlite")
 db=dbConnect(RSQLite::SQLite(),"db.sqlite")
 # create table
 tableName="timeline"
-colName=c("project",
+colName=c("id",
+          "analyst",
+          "project",
           "task",
           "task_dependency",
           "duration_week",
           "startDate",
           "endDate")
-colType=c("TEXT",
+colType=c("INTEGER",
+          "TEXT",
+          "TEXT",
           "TEXT",
           "TEXT",
           "INTEGER",
