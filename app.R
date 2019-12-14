@@ -1,5 +1,4 @@
-library(rstudioapi)
-setwd(dirname(getSourceEditorContext()$path))
+setwd(dirname(rstudioapi::getSourceEditorContext()$path))
 source("loadVar.R")
 source("initiateDB.R")
 ui=fluidPage(
@@ -10,6 +9,7 @@ ui=fluidPage(
                wellPanel(
                    textInput("project","Project"),
                    uiOutput("ui_taskDependency"),
+                   selectizeInput('analyst',glue('Analyst ({length(analystList)})'),analystList,multiple=T,options=optPlaceholder),
                    textInput("task","Task"),
                    dateInput("startD","Start date"),
                    sliderInput("duration_week","Duration (week)",1,10,3),
@@ -17,7 +17,7 @@ ui=fluidPage(
                    actionButton("reset","Reset")
                )
         ),
-        column(7,
+        column(9,
                tabsetPanel(
                    tabPanel("timevis",
                             br(),
@@ -33,19 +33,25 @@ server=function(input,output,session) {
     rv=reactiveValues(state=F)
     
     observeEvent(input$project,{
+        conn=dbConnect(RSQLite::SQLite(),"db.sqlite")
+        dt=dbReadTable(conn,"timeline")%>%setDT
+        dbDisconnect(conn)
+        if(nrow(dt)>0){
+            setSelection("gantt",dt[project==input$project,id])
+        }
         output$ui_taskDependency=renderUI({
-            conn=dbConnect(RSQLite::SQLite(),"db.sqlite")
-            dt=dbReadTable(conn,"timeline")%>%setDT
-            dbDisconnect(conn)
             if(dt[project==input$project,.N]>0) {
                 choices=dt[project==input$project,c("",sort(unique(task)))]
-                UI=selectInput("task_dependency","Task dependency",choices,size=length(choices),selectize=F)
+                UI=selectizeInput("task_dependency",glue("Dependency ({length(choices)-1})"),choices,options=optPlaceholder)
                 rv$state=T
                 return(UI)
             } else {
                 ""
             }
         })
+        if(nrow(dt)>0){
+            updateSelectizeInput(session,"analyst",selected=dt[project==input$project,unlist(str_split(analyst,","))])
+        }
     })
     
     observe({
@@ -68,7 +74,9 @@ server=function(input,output,session) {
     observeEvent(input$submit,{
         conn=dbConnect(RSQLite::SQLite(),"db.sqlite")
         endDate=as.character(date(as.character(input$startD))+(input$duration_week*7))
-        newData=data.table(project=input$project,
+        newData=data.table(id=floor(runif(1,1e6,1e7)),
+                           analyst=paste0(input$analyst,collapse=","),
+                           project=input$project,
                            task=input$task,
                            task_dependency=input$task_dependency,
                            duration_week=input$duration_week,
@@ -76,12 +84,13 @@ server=function(input,output,session) {
                            endDate=endDate)
         dbAppendTable(conn,"timeline",newData)
         dbDisconnect(conn)
-        sapply(c("project","task"),shinyjs::reset)
+        sapply(c("analyst","project","task"),shinyjs::reset)
         rv$state=F
     })
     
     observeEvent(input$reset,{
-        sapply(c("project","task"),shinyjs::reset)
+        sapply(c("analyst","project","task"),shinyjs::reset)
+        updateDateInput(session,"startD",value=initialDate)
     })
     
     dt=eventReactive(input$submit,{
@@ -98,7 +107,8 @@ server=function(input,output,session) {
     output$gantt=renderTimevis({
         data=dt()%>%
             setDT%>%
-            .[,.(start=startDate,
+            .[,.(id=id,
+                 start=startDate,
                  end=endDate,
                  group=project,
                  content=task)]
