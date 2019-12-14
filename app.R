@@ -11,6 +11,7 @@ ui=fluidPage(
                    textInput("project","Project"),
                    uiOutput("ui_taskDependency"),
                    textInput("task","Task"),
+                   dateInput("startD","Start date"),
                    sliderInput("duration_week","Duration (week)",1,10,3),
                    actionButton("submit","Submit"),
                    actionButton("reset","Reset")
@@ -30,56 +31,70 @@ ui=fluidPage(
 )
 server=function(input,output,session) {
     rv=reactiveValues(state=F)
-    output$ui_taskDependency=renderUI({
-        req(input$project)
-        conn=dbConnect(RSQLite::SQLite(),"db.sqlite")
-        dt=dbReadTable(conn,"timeline")%>%setDT
-        dbDisconnect(conn)
-        if(dt[project==input$project,.N]>0) {
-            choices=dt[project==input$project,c("",sort(unique(task)))]
-            UI=selectInput("task_dependency","Task dependency",choices,size=length(choices),selectize=F)
-            rv$state=T
-            return(UI)
+    
+    observeEvent(input$project,{
+        output$ui_taskDependency=renderUI({
+            conn=dbConnect(RSQLite::SQLite(),"db.sqlite")
+            dt=dbReadTable(conn,"timeline")%>%setDT
+            dbDisconnect(conn)
+            if(dt[project==input$project,.N]>0) {
+                choices=dt[project==input$project,c("",sort(unique(task)))]
+                UI=selectInput("task_dependency","Task dependency",choices,size=length(choices),selectize=F)
+                rv$state=T
+                return(UI)
+            } else {
+                ""
+            }
+        })
+    })
+    
+    observe({
+        if(rv$state){
+            if(!is.null(input$task_dependency)){
+                if(input$task_dependency!=""){
+                    conn=dbConnect(RSQLite::SQLite(),"db.sqlite")
+                    dt=dbReadTable(conn,"timeline")%>%setDT
+                    dbDisconnect(conn)
+                    updateDateInput(session,"startD",value=dt[project==input$project&task==input$task_dependency,date(endDate)])
+                } else {
+                    updateDateInput(session,"startD",value=initialDate)
+                }
+            }
         } else {
-            ""
+            updateDateInput(session,"startD",value=initialDate)   
         }
     })
+    
     observeEvent(input$submit,{
         conn=dbConnect(RSQLite::SQLite(),"db.sqlite")
-        dt=dbReadTable(conn,"timeline")%>%setDT
-        if(rv$state==F){
-            startDate=as.character(initialDate)
-        } else {
-            if(input$task_dependency!=""){
-                startDate=dt[project==input$project&task==input$task_dependency,endDate]
-            } else {
-                startDate=as.character(initialDate)
-            }
-        }
-        endDate=as.character(date(startDate)+(input$duration_week*7))
+        endDate=as.character(date(as.character(input$startD))+(input$duration_week*7))
         newData=data.table(project=input$project,
                            task=input$task,
                            task_dependency=input$task_dependency,
                            duration_week=input$duration_week,
-                           startDate=startDate,
+                           startDate=as.character(input$startD),
                            endDate=endDate)
         dbAppendTable(conn,"timeline",newData)
         dbDisconnect(conn)
         sapply(c("project","task"),shinyjs::reset)
         rv$state=F
     })
+    
     observeEvent(input$reset,{
         sapply(c("project","task"),shinyjs::reset)
     })
+    
     dt=eventReactive(input$submit,{
         conn=dbConnect(RSQLite::SQLite(),"db.sqlite")
         dt=dbReadTable(conn,"timeline")
         dbDisconnect(conn)
         return(dt)
     },ignoreNULL = F)
+    
     output$timelineDT=DT::renderDataTable({
         datatable(dt())
     })
+    
     output$gantt=renderTimevis({
         data=dt()%>%
             setDT%>%
