@@ -5,5 +5,13 @@ pacman::p_load(RSQLite,
                shiny,
                DT,
                lubridate,
-               shinyjs)
+               timevis,
+               shinyjs,
+               glue,
+               stringr)
+analystList=sort(c("HAZ","JIUN","HANI","YAN"))
+optPlaceholder=list(
+  placeholder='Select options below',
+  onInitialize=I('function() { this.setValue(""); }')
+)
 initialDate=date(today())
